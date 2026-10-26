@@ -1194,9 +1194,25 @@ export default {
 				临时中转域名 = [...new Set(临时中转域名)];
 			}
 
+			let r2Addresses = [];
+			if (env.ADDRESS_BUCKET) {
+				try {
+					const r2Object = await env.ADDRESS_BUCKET.get('addresses.txt');
+					if (r2Object) {
+						r2Addresses = (await 整理(await r2Object.text()))
+							.map(address => address.trim())
+							.filter(Boolean);
+					} else {
+						console.warn('R2 中未找到 addresses.txt；本次请求将继续使用其他地址来源');
+					}
+				} catch (error) {
+					console.error('读取 R2 地址列表失败:', error);
+				}
+			}
+
 			const newAddressesapi = await 整理优选列表(addressesapi);
 			const newAddressescsv = await 整理测速结果('TRUE');
-			const uniqueAddresses = Array.from(new Set(addresses.concat(newAddressesapi, newAddressescsv).filter(item => item && item.trim())));
+			const uniqueAddresses = Array.from(new Set(addresses.concat(r2Addresses, newAddressesapi, newAddressescsv).filter(item => item && item.trim())));
 
 			let notlsresponseBody;
 			if ((noTLS == 'true' && 协议类型 == atob(`\u0056\u006b\u0078\u0046\u0055\u0031\u004d\u003d`)) || 协议类型 == 'VMess') {
