@@ -997,6 +997,81 @@ export default {
 		url.searchParams.delete('__exp');
 		url.searchParams.delete('__sig');
 
+		// Private, authenticated address-list replacement endpoint for the local optimizer.
+		if (url.pathname === '/__admin/addresses') {
+			if (request.method !== 'POST') {
+				return new Response('Method Not Allowed', {
+					status: 405,
+					headers: { 'allow': 'POST', 'cache-control': 'no-store' },
+				});
+			}
+			// Uploads must use the Authorization header; never accept the secret in the query string here.
+			if (!bearerMatch || !constantTimeStringEqual(bearerMatch[1].trim(), accessSecret)) {
+				return new Response('Unauthorized', {
+					status: 401,
+					headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
+				});
+			}
+			if (!env.ADDRESS_BUCKET) {
+				return new Response('R2 binding ADDRESS_BUCKET is unavailable.', {
+					status: 503,
+					headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
+				});
+			}
+
+			const body = await request.text();
+			if (new TextEncoder().encode(body).byteLength > 512 * 1024) {
+				return new Response('Address list is too large.', {
+					status: 413,
+					headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
+				});
+			}
+			const inputLines = body.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+			if (inputLines.length === 0 || inputLines.length > 500) {
+				return new Response('Address list must contain between 1 and 500 entries.', {
+					status: 400,
+					headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
+				});
+			}
+
+			const normalized = [];
+			const seen = new Set();
+			for (const line of inputLines) {
+				const match = line.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3}):(\d{1,5})#([A-Z]{2})$/);
+				if (!match) {
+					return new Response('Invalid entry format; expected IPv4:port#CC.', {
+						status: 400,
+						headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
+					});
+				}
+				const octets = match.slice(1, 5).map(Number);
+				const port = Number(match[5]);
+				if (octets.some(octet => octet < 0 || octet > 255) || port < 1 || port > 65535) {
+					return new Response('Invalid IPv4 address or port.', {
+						status: 400,
+						headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
+					});
+				}
+				const normalizedLine = line;
+				if (!seen.has(normalizedLine)) {
+					seen.add(normalizedLine);
+					normalized.push(normalizedLine);
+				}
+			}
+
+			await env.ADDRESS_BUCKET.put('addresses.txt', normalized.join('\n') + '\n', {
+				httpMetadata: { contentType: 'text/plain; charset=utf-8' },
+			});
+			return Response.json({
+				ok: true,
+				object: 'addresses.txt',
+				received: inputLines.length,
+				stored: normalized.length,
+			}, {
+				headers: { 'cache-control': 'no-store' },
+			});
+		}
+
 		if (env.TOKEN) 快速订阅访问入口 = await 整理(env.TOKEN);
 		BotToken = env.TGTOKEN || BotToken;
 		ChatID = env.TGID || ChatID;
