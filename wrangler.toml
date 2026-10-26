@@ -2,3 +2,7 @@ name = "restless-haze-3188"
 main = "_worker.js"
 compatibility_date = "2025-09-07"
 keep_vars = true
+
+[[r2_buckets]]
+binding = "ADDRESS_BUCKET"
+bucket_name = "still-bonus-48c6"
