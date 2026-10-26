@@ -888,6 +888,12 @@ async function subHtml(request) {
 								
 								subLink = \`https://\${domain}/sub?\${uuidType}=\${uuid}&\${search}\`;
 							}
+							const accessKey = new URLSearchParams(window.location.search).get('key');
+							if (accessKey) {
+								const subUrl = new URL(subLink);
+								subUrl.searchParams.set('key', accessKey);
+								subLink = subUrl.toString();
+							}
 							document.getElementById('result').value = subLink;
 	
 							// 更新二维码
@@ -918,8 +924,79 @@ async function subHtml(request) {
 	});
 }
 
+function constantTimeStringEqual(a, b) {
+	if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+	let difference = 0;
+	for (let i = 0; i < a.length; i++) difference |= a.charCodeAt(i) ^ b.charCodeAt(i);
+	return difference === 0;
+}
+
+async function hmacSha256Hex(secret, value) {
+	const key = await crypto.subtle.importKey(
+		'raw',
+		new TextEncoder().encode(secret),
+		{ name: 'HMAC', hash: 'SHA-256' },
+		false,
+		['sign']
+	);
+	const signature = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(value));
+	return Array.from(new Uint8Array(signature), byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function verifySignedWorkerRequest(url, secret) {
+	const expiresRaw = url.searchParams.get('__exp');
+	const signature = url.searchParams.get('__sig');
+	if (!/^\\d{10}$/.test(expiresRaw || '') || !signature) return false;
+
+	const expiresAt = Number(expiresRaw);
+	const now = Math.floor(Date.now() / 1000);
+	if (expiresAt < now || expiresAt > now + 600) return false;
+
+	const canonicalUrl = new URL(url.href);
+	canonicalUrl.searchParams.delete('__sig');
+	const expected = await hmacSha256Hex(secret, canonicalUrl.href);
+	return constantTimeStringEqual(signature, expected);
+}
+
+async function createSignedInternalURL(rawUrl, secret) {
+	const signedUrl = new URL(rawUrl);
+	signedUrl.searchParams.delete('key');
+	signedUrl.searchParams.delete('__exp');
+	signedUrl.searchParams.delete('__sig');
+	signedUrl.searchParams.set('__exp', String(Math.floor(Date.now() / 1000) + 300));
+	const signature = await hmacSha256Hex(secret, signedUrl.href);
+	signedUrl.searchParams.set('__sig', signature);
+	return signedUrl.href;
+}
+
 export default {
 	async fetch(request, env) {
+		const url = new URL(request.url);
+		const accessSecret = env.SUBSCRIPTION_KEY;
+		if (typeof accessSecret !== 'string' || accessSecret.length < 32) {
+			return new Response('Subscription access key is not configured or is too short.', {
+				status: 503,
+				headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
+			});
+		}
+
+		const authorization = request.headers.get('Authorization') || '';
+		const bearerMatch = authorization.match(/^Bearer\\s+(.+)$/i);
+		const providedKey = bearerMatch ? bearerMatch[1].trim() : url.searchParams.get('key');
+		let authorized = constantTimeStringEqual(providedKey, accessSecret);
+		if (!authorized) authorized = await verifySignedWorkerRequest(url, accessSecret);
+		if (!authorized) {
+			return new Response('Unauthorized', {
+				status: 401,
+				headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
+			});
+		}
+
+		// Never pass the master key or internal signed-request parameters into generated URLs.
+		url.searchParams.delete('key');
+		url.searchParams.delete('__exp');
+		url.searchParams.delete('__sig');
+
 		if (env.TOKEN) 快速订阅访问入口 = await 整理(env.TOKEN);
 		BotToken = env.TGTOKEN || BotToken;
 		ChatID = env.TGID || ChatID;
@@ -945,7 +1022,6 @@ export default {
 		网络备案 = env.BEIAN || env.BY || 网络备案;
 		const userAgentHeader = request.headers.get('User-Agent');
 		const userAgent = userAgentHeader ? userAgentHeader.toLowerCase() : "null";
-		const url = new URL(request.url);
 		const format = url.searchParams.get('format') ? url.searchParams.get('format').toLowerCase() : "null";
 		let host = "";
 		let uuid = "";
@@ -1159,6 +1235,7 @@ export default {
 			}
 			return await subHtml(request);
 		} else if ((userAgent.includes('clash') || userAgent.includes('meta') || userAgent.includes('mihomo') || (format === 'clash' && !isSubConverterRequest)) && !userAgent.includes('nekobox') && !userAgent.includes('cf-workers-sub')) {
+			subConverterUrl = await createSignedInternalURL(subConverterUrl, accessSecret);
 			subConverterUrl = `${subProtocol}://${subConverter}/sub?target=clash&url=${encodeURIComponent(subConverterUrl)}&insert=false&config=${encodeURIComponent(subConfig)}&emoji=true&list=false&tfo=false&scv=${scv}&fdn=false&sort=false&new_name=true`;
 		} else if ((userAgent.includes('sing-box') || userAgent.includes('singbox') || (format === 'singbox' && !isSubConverterRequest)) && !userAgent.includes('cf-workers-sub')) {
 			if (协议类型 == 'VMess' && url.href.includes('path=')) {
@@ -1168,6 +1245,7 @@ export default {
 				const 待处理路径参数 = url.href.split('path=')[1].split('&')[0] || '';
 				if (待处理路径参数.includes('%3F')) subConverterUrl = generateFakeInfo(路径参数前部分 + 'path=' + 待处理路径参数.split('%3F')[0] + '&' + 路径参数后部分, uuid, host);
 			}
+			subConverterUrl = await createSignedInternalURL(subConverterUrl, accessSecret);
 			subConverterUrl = `${subProtocol}://${subConverter}/sub?target=singbox&url=${encodeURIComponent(subConverterUrl)}&insert=false&config=${encodeURIComponent(subConfig)}&emoji=true&list=false&tfo=false&scv=${scv}&fdn=false&sort=false&new_name=true`;
 		} else {
 			if (host.includes('workers.dev')) {
