@@ -946,7 +946,7 @@ async function hmacSha256Hex(secret, value) {
 async function verifySignedWorkerRequest(url, secret) {
 	const expiresRaw = url.searchParams.get('__exp');
 	const signature = url.searchParams.get('__sig');
-	if (!/^\\d{10}$/.test(expiresRaw || '') || !signature) return false;
+	if (!/^\d{10}$/.test(expiresRaw || '') || !signature) return false;
 
 	const expiresAt = Number(expiresRaw);
 	const now = Math.floor(Date.now() / 1000);
@@ -981,7 +981,7 @@ export default {
 		}
 
 		const authorization = request.headers.get('Authorization') || '';
-		const bearerMatch = authorization.match(/^Bearer\\s+(.+)$/i);
+		const bearerMatch = authorization.match(/^Bearer\s+(.+)$/i);
 		const providedKey = bearerMatch ? bearerMatch[1].trim() : url.searchParams.get('key');
 		let authorized = constantTimeStringEqual(providedKey, accessSecret);
 		if (!authorized) authorized = await verifySignedWorkerRequest(url, accessSecret);
